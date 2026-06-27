@@ -1,0 +1,78 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ActiveUserService ActiveUser
+@inject LegoApiService Api
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4 d-flex justify-content-between align-items-center">
+            <span class="text-muted small">
+                <span class="lego-stud">&#9632;</span> Builder Catalogue
+            </span>
+            @if (_loading)
+            {
+                <span class="spinner-border spinner-border-sm text-warning" role="status"></span>
+            }
+            else if (_users.Count > 0)
+            {
+                <select class="form-select form-select-sm" style="max-width:220px"
+                        value="@ActiveUser.CurrentUser?.Id"
+                        @onchange="SelectUser">
+                    @foreach (var u in _users)
+                    {
+                        <option value="@u.Id">@u.Username</option>
+                    }
+                </select>
+            }
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private List<UserSummary> _users = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ActiveUser.OnUserChanged += HandleUserChanged;
+        try
+        {
+            _users = await Api.GetUsersAsync();
+            if (_users.Count > 0 && ActiveUser.CurrentUser is null)
+                ActiveUser.Login(_users[0]);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SelectUser(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        var user = _users.FirstOrDefault(u => u.Id == id);
+        if (user is not null)
+            ActiveUser.Login(user);
+    }
+
+    private void HandleUserChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ActiveUser.OnUserChanged -= HandleUserChanged;
+    }
+}

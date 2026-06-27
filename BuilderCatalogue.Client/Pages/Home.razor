@@ -1,0 +1,242 @@
+@page "/"
+@rendermode InteractiveAuto
+@implements IDisposable
+@inject LegoApiService Api
+@inject UserCacheService UserCache
+@inject ActiveUserService ActiveUser
+@using BuilderCatalogue.Client.Components
+
+<PageTitle>Builder Catalogue— @(ActiveUser.CurrentUser?.Username ?? "")</PageTitle>
+
+@if (_loading)
+{
+    <div class="d-flex flex-column align-items-center justify-content-center mt-5 gap-3">
+        <div class="spinner-border text-warning" style="width:3rem;height:3rem;" role="status">
+            <span class="visually-hidden">Loading…</span>
+        </div>
+        <p class="text-muted">Fetching inventory and sets…</p>
+    </div>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-danger mt-3">
+        <h5 class="alert-heading">Failed to load data</h5>
+        <p class="mb-2">@_error</p>
+        <button class="btn btn-sm btn-danger" @onclick="() => LoadDataAsync()">Retry</button>
+    </div>
+}
+else if (_user is not null)
+{
+    <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+        <div>
+            <h1 class="mb-1">
+                <span class="lego-stud">&#9632;</span> @_user.Username
+            </h1>
+            <span class="text-muted small">
+                @_user.Location &nbsp;·&nbsp; @_user.BrickCount.ToString("N0") pieces in inventory
+                &nbsp;·&nbsp; @_user.Collection.Count distinct part types
+            </span>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-1"
+                @onclick="() => LoadDataAsync(refresh: true)"
+                disabled="@_refreshing">
+            @if (_refreshing)
+            {
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+            }
+            ↻ Refresh inventory
+        </button>
+    </div>
+
+    <div class="row g-2 mb-4">
+        <div class="col-auto">
+            <span class="badge bg-success fs-6 px-3 py-2">
+                ✅ @_canBuild.Count can build
+            </span>
+        </div>
+        <div class="col-auto">
+            <span class="badge bg-danger fs-6 px-3 py-2">
+                ❌ @_cannotBuild.Count cannot build
+            </span>
+        </div>
+        <div class="col-auto">
+            <span class="badge bg-secondary fs-6 px-3 py-2">
+                @_results.Count total sets
+            </span>
+        </div>
+    </div>
+
+    @if (_canBuild.Count > 0)
+    {
+        <h4 class="text-success mb-3">Can Build</h4>
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3 mb-5">
+            @foreach (var r in _canBuild.OrderBy(r => r.Set.Name))
+            {
+                <div class="col">
+                    <div class="card border-success h-100 shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title text-capitalize fw-bold">
+                                @r.Set.Name.Replace('-', ' ')
+                            </h6>
+                            <p class="card-text text-muted small mb-2">
+                                @r.Set.SetNumber &nbsp;·&nbsp; @r.Set.TotalPieces.ToString("N0") pieces
+                            </p>
+                            <span class="badge bg-success">Ready to build</span>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_cannotBuild.Count > 0)
+    {
+        <h4 class="text-danger mb-3">Cannot Build</h4>
+        <div class="d-flex flex-column gap-2 mb-4">
+            @foreach (var r in _cannotBuild.OrderBy(r => r.Missing.Count))
+            {
+                var setId = r.Set.Id;
+                <UnbuildableSetCard
+                    Result="r"
+                    IsExpanded="_expanded.Contains(setId)"
+                    IsFindingCollabs="_findingCollabs.Contains(setId)"
+                    SubResult="_subResults.GetValueOrDefault(setId)"
+                    CollabResult="_collabResults.GetValueOrDefault(setId)"
+                    OnToggle="() => ToggleExpand(setId)"
+                    OnFindCollaborators="() => FindCollaboratorsAsync(setId)" />
+            }
+        </div>
+    }
+}
+
+@code {
+    private User? _user;
+    private List<BuildResult> _results    = [];
+    private List<BuildResult> _canBuild   = [];
+    private List<BuildResult> _cannotBuild = [];
+    private readonly HashSet<string> _expanded = [];
+
+    private bool    _loading    = true;
+    private bool    _refreshing;
+    private string? _error;
+
+    private Dictionary<string, LegoSet> _setDetails = [];
+    private readonly Dictionary<string, SubstitutedBuildResult> _subResults    = [];
+    private readonly Dictionary<string, List<CollaborationCombination>> _collabResults = [];
+    private readonly HashSet<string>    _findingCollabs = [];
+    private List<(UserSummary Summary, User Detail)>? _otherUsers;
+
+    protected override void OnInitialized()
+    {
+        ActiveUser.OnUserChanged += OnUserSwitched;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    private void OnUserSwitched() => InvokeAsync(async () =>
+    {
+        await LoadDataAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        ActiveUser.OnUserChanged -= OnUserSwitched;
+    }
+
+    private async Task LoadDataAsync(bool refresh = false)
+    {
+        if (ActiveUser.CurrentUser is null)
+        {
+            _loading = false;
+            return;
+        }
+
+        _loading    = !refresh;
+        _refreshing = refresh;
+        _error      = null;
+
+        if (refresh)
+        {
+            _subResults.Clear();
+            _collabResults.Clear();
+            _otherUsers = null;
+        }
+
+        try
+        {
+            _user = await UserCache.GetUserAsync(ActiveUser.CurrentUser.Id, forceRefresh: refresh);
+
+            var sets       = await Api.GetSetsAsync(forceRefresh: refresh);
+            var setDetails = await Task.WhenAll(sets.Select(s => Api.GetSetByIdAsync(s.Id, forceRefresh: refresh)));
+
+            _setDetails = [];
+            _results    = [];
+            for (var i = 0; i < sets.Count; i++)
+            {
+                _setDetails[sets[i].Id] = setDetails[i];
+                _results.Add(BuildAnalysisService.Analyze(sets[i], setDetails[i], _user));
+            }
+
+            _canBuild    = _results.Where(r =>  r.CanBuild).ToList();
+            _cannotBuild = _results.Where(r => !r.CanBuild).ToList();
+
+            _subResults.Clear();
+            foreach (var r in _cannotBuild)
+            {
+                if (_setDetails.TryGetValue(r.Set.Id, out var detail))
+                    _subResults[r.Set.Id] = ColorSubstitutionService.Analyze(detail, _user);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading    = false;
+            _refreshing = false;
+        }
+    }
+
+    private void ToggleExpand(string setId)
+    {
+        if (_expanded.Contains(setId))
+        {
+            _expanded.Remove(setId);
+        }
+        else
+        {
+            _expanded.Clear();
+            _expanded.Add(setId);
+        }
+    }
+
+    private async Task FindCollaboratorsAsync(string setId)
+    {
+        if (_user is null || !_setDetails.TryGetValue(setId, out var set)) return;
+
+        _findingCollabs.Add(setId);
+        _collabResults.Remove(setId);
+
+        try
+        {
+            await EnsureOtherUsersAsync();
+            _collabResults[setId] = CollaborationService.FindAllMinimalCombinations(set, _user, _otherUsers!);
+        }
+        finally
+        {
+            _findingCollabs.Remove(setId);
+        }
+    }
+
+    private async Task EnsureOtherUsersAsync()
+    {
+        if (_otherUsers is not null) return;
+        var all    = await Api.GetUsersAsync();
+        var others = all.Where(u => u.Id != _user!.Id).ToList();
+        var details = await Task.WhenAll(others.Select(u => UserCache.GetUserAsync(u.Id)));
+        _otherUsers = others.Zip(details).Select(x => (x.Item1, x.Item2)).ToList();
+    }
+
+}
