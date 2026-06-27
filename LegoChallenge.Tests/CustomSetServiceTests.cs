@@ -118,6 +118,107 @@ public class CustomSetServiceTests
         Assert.Contains(result, p => p.DesignId == "A" && p.ColorCode == 2 && p.Quantity == 3);
     }
 
+    [Fact]
+    public void BuildOptimalSet_CustomThresholdRequiresRequestedPercentage()
+    {
+        var u1 = Build.UserWith(("A", 1, 10), ("B", 1, 5)) with { Id = "u1" };
+        var u2 = Build.UserWith(("A", 1, 4)) with { Id = "u2" };
+
+        var result = CustomSetService.BuildOptimalSet([u1, u2], targetPercentage: 100);
+
+        var piece = Assert.Single(result);
+        Assert.Equal("A", piece.DesignId);
+        Assert.Equal(4, piece.Quantity);
+    }
+
+    [Fact]
+    public void BuildOptimalSet_LowerThresholdCanProduceLargerSet()
+    {
+        var u1 = Build.UserWith(("A", 1, 10), ("B", 1, 5)) with { Id = "u1" };
+        var u2 = Build.UserWith(("A", 1, 4)) with { Id = "u2" };
+        var u3 = Build.UserWith(("A", 1, 3)) with { Id = "u3" };
+        var u4 = Build.UserWith(("A", 1, 2)) with { Id = "u4" };
+
+        var result = CustomSetService.BuildOptimalSet([u1, u2, u3, u4], targetPercentage: 25);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, p => p.DesignId == "A" && p.Quantity == 10);
+        Assert.Contains(result, p => p.DesignId == "B" && p.Quantity == 5);
+    }
+
+    [Fact]
+    public void BuildOptimalSet_RequiredUserIsIncludedInQualifyingGroup()
+    {
+        var target = Build.UserWith(("A", 1, 2)) with { Id = "target" };
+        var partner = Build.UserWith(("A", 1, 5)) with { Id = "partner" };
+        var rich1 = Build.UserWith(("B", 1, 10), ("C", 1, 10)) with { Id = "rich1" };
+        var rich2 = Build.UserWith(("B", 1, 8), ("C", 1, 8)) with { Id = "rich2" };
+
+        var result = CustomSetService.BuildOptimalSet(
+            [target, partner, rich1, rich2],
+            requiredUserIds: ["target"]);
+
+        var piece = Assert.Single(result);
+        Assert.Equal("A", piece.DesignId);
+        Assert.Equal(2, piece.Quantity);
+        Assert.True(CustomSetService.CanBuildSpec(result, target));
+    }
+
+    [Fact]
+    public void BuildOptimalSet_MultipleRequiredUsersOverrideSmallerThresholdCount()
+    {
+        var u1 = Build.UserWith(("A", 1, 5), ("B", 1, 2)) with { Id = "u1" };
+        var u2 = Build.UserWith(("A", 1, 3)) with { Id = "u2" };
+        var u3 = Build.UserWith(("C", 1, 10)) with { Id = "u3" };
+        var u4 = Build.UserWith(("D", 1, 10)) with { Id = "u4" };
+
+        var result = CustomSetService.BuildOptimalSet(
+            [u1, u2, u3, u4],
+            targetPercentage: 25,
+            requiredUserIds: ["u1", "u2"]);
+
+        var piece = Assert.Single(result);
+        Assert.Equal("A", piece.DesignId);
+        Assert.Equal(3, piece.Quantity);
+        Assert.True(CustomSetService.CanBuildSpec(result, u1));
+        Assert.True(CustomSetService.CanBuildSpec(result, u2));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public void BuildOptimalSet_InvalidThresholdThrows(int targetPercentage)
+    {
+        var users = new List<User> { Build.UserWith(("A", 1, 1)) };
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CustomSetService.BuildOptimalSet(users, targetPercentage));
+    }
+
+    [Fact]
+    public void BuildOptimalSet_UnknownRequiredUserThrows()
+    {
+        var users = new List<User>
+        {
+            Build.UserWith(("A", 1, 1)) with { Id = "known" }
+        };
+
+        Assert.Throws<ArgumentException>(
+            () => CustomSetService.BuildOptimalSet(users, requiredUserIds: ["unknown"]));
+    }
+
+    [Fact]
+    public void BuildOptimalSet_GreedyPathStillIncludesFullQualifyingGroup()
+    {
+        var users = Enumerable.Range(1, 21)
+            .Select(i => Build.UserWith(($"piece-{i}", 1, 1)) with { Id = $"u{i}" })
+            .ToList();
+
+        var result = CustomSetService.BuildOptimalSet(users, targetPercentage: 100);
+
+        Assert.Empty(result);
+    }
+
     // ── CanBuildSpec ──────────────────────────────────────────────────────────
 
     [Fact]

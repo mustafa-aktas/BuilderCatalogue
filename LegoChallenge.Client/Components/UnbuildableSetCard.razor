@@ -1,0 +1,188 @@
+@inject ColorService Colours
+
+<div class="card border-danger shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center"
+         style="cursor:pointer"
+         @onclick="OnToggle">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="fw-bold text-capitalize">@Result.Set.Name.Replace('-', ' ')</span>
+            <span class="badge bg-secondary">@Result.Set.TotalPieces.ToString("N0") pieces</span>
+            <span class="badge bg-danger">@Result.Missing.Count missing type(s)</span>
+            @if (SubResult is not null)
+            {
+                @if (SubResult.CanBuild)
+                {
+                    <span class="badge bg-success">🔄 Buildable with substitution</span>
+                }
+                else
+                {
+                    <span class="badge bg-warning text-dark">No substitution found</span>
+                }
+            }
+        </div>
+        <span class="text-muted">@(IsExpanded ? "▲" : "▼")</span>
+    </div>
+
+    @if (IsExpanded)
+    {
+        <div class="card-body p-0">
+
+            @* ── Missing pieces ──────────────────────────── *@
+            <table class="table table-sm table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Part ID</th>
+                        <th>Color</th>
+                        <th class="text-end">Required</th>
+                        <th class="text-end">Have</th>
+                        <th class="text-end">Short by</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in Result.Missing.OrderByDescending(m => m.ShortBy))
+                    {
+                        <tr>
+                            <td><code>@m.DesignId</code></td>
+                            <td>
+                                <span class="color-swatch me-1" style="background:@Colours.GetHint(m.ColorCode)"></span>
+                                @Colours.GetName(m.ColorCode)
+                            </td>
+                            <td class="text-end">@m.Required</td>
+                            <td class="text-end @(m.Have == 0 ? "text-danger fw-bold" : "")">@m.Have</td>
+                            <td class="text-end text-danger fw-bold">@m.ShortBy</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @* ── Actions ─────────────────────────────────── *@
+            <div class="p-3 border-top d-flex flex-wrap gap-3 align-items-center">
+                <button class="btn btn-outline-primary btn-sm"
+                        @onclick="OnFindCollaborators"
+                        disabled="@IsFindingCollabs">
+                    @if (IsFindingCollabs)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                    }
+                    Find collaborators
+                </button>
+            </div>
+
+            @* ── Colour substitution ───────────────── *@
+            @if (SubResult is not null)
+            {
+                <div class="p-3 border-top">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold small text-info">With colour substitution</span>
+                        @if (SubResult.CanBuild)
+                        {
+                            <span class="badge bg-success">✅ Can build!</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">Still cannot build</span>
+                        }
+                    </div>
+                    @if (SubResult.Substitutions.Count > 0)
+                    {
+                        <table class="table table-sm mb-0">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Replace all pieces of colour</th>
+                                    <th></th>
+                                    <th>With</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var s in SubResult.Substitutions)
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="color-swatch me-1" style="background:@Colours.GetHint(s.OriginalColor)"></span>
+                                            @Colours.GetName(s.OriginalColor)
+                                        </td>
+                                        <td class="text-muted">→</td>
+                                        <td>
+                                            <span class="color-swatch me-1" style="background:@Colours.GetHint(s.SubstituteColor)"></span>
+                                            @Colours.GetName(s.SubstituteColor)
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    @if (!SubResult.CanBuild && SubResult.Missing.Count > 0)
+                    {
+                        <p class="small text-danger mb-0 mt-1">
+                            @SubResult.Missing.Count type(s) still missing after substitution.
+                        </p>
+                    }
+                </div>
+            }
+
+            @* ── Collaboration combinations ───────────────── *@
+            @if (CollabResult is not null)
+            {
+                <div class="p-3 border-top">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <span class="fw-semibold">Collaborator options</span>
+                        <span class="badge bg-secondary">@CollabResult.Count option(s)</span>
+                    </div>
+
+                    @if (CollabResult.Count == 0)
+                    {
+                        <p class="small text-danger mb-0">No combination of users can fully cover the missing pieces.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @{ int optNum = 0; }
+                            @foreach (var combo in CollabResult)
+                            {
+                                optNum++;
+                                var comboPcs = combo.Contributors.Sum(c => c.Pieces.Sum(p => p.Quantity));
+                                <div class="border rounded p-2">
+                                    <div class="d-flex align-items-center justify-content-between mb-2">
+                                        <span class="badge bg-primary">Option @optNum</span>
+                                        <span class="text-muted small">
+                                            @combo.Contributors.Count user(s) · @comboPcs pcs total
+                                        </span>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var c in combo.Contributors)
+                                        {
+                                            var cPcs = c.Pieces.Sum(p => p.Quantity);
+                                            <div class="d-flex align-items-center gap-2 border rounded px-2 py-1 bg-light">
+                                                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center flex-shrink-0"
+                                                     style="width:28px;height:28px;font-size:0.7rem;font-weight:700;">
+                                                    @(c.User.Username.Length > 0 ? c.User.Username[0..1].ToUpper() : "?")
+                                                </div>
+                                                <div>
+                                                    <div class="fw-semibold" style="font-size:0.8rem;">@c.User.Username</div>
+                                                    <div class="text-muted" style="font-size:0.65rem;">
+                                                        @c.User.Location · @cPcs pcs · @c.Pieces.Count type(s)
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public BuildResult Result        { get; set; } = default!;
+    [Parameter, EditorRequired] public bool        IsExpanded    { get; set; }
+    [Parameter, EditorRequired] public bool        IsFindingCollabs { get; set; }
+    [Parameter, EditorRequired] public EventCallback OnToggle           { get; set; }
+    [Parameter, EditorRequired] public EventCallback OnFindCollaborators { get; set; }
+    [Parameter] public SubstitutedBuildResult?        SubResult   { get; set; }
+    [Parameter] public List<CollaborationCombination>? CollabResult { get; set; }
+}

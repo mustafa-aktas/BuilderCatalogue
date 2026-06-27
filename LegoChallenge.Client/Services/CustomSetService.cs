@@ -4,26 +4,48 @@ namespace LegoChallenge.Client.Services;
 
 public static class CustomSetService
 {
-    // Above this threshold C(n, ceil(n/2)) grows too large for brute force;
+    // Above this threshold the qualifying-user combinations grow too large for brute force;
     // greedy-add is used instead (not guaranteed optimal but always correct).
     private const int BruteForceMaxN = 20;
 
     /// <summary>
     /// Finds the largest spec (most distinct piece types, total quantity as tiebreak)
-    /// such that at least ceil(n/2) users can build it. Every user in the chosen
-    /// qualifying set can build the result by construction — quantities are capped at
-    /// each member's minimum owned.
+    /// such that at least the requested percentage of users can build it. Required
+    /// users are always included in the qualifying group. Quantities are capped at
+    /// each qualifying member's minimum owned.
     /// </summary>
-    public static List<CustomSetPiece> BuildOptimalSet(List<User> users)
+    public static List<CustomSetPiece> BuildOptimalSet(
+        List<User> users,
+        int targetPercentage = 50,
+        IReadOnlyCollection<string>? requiredUserIds = null)
     {
+        if (targetPercentage is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(
+                nameof(targetPercentage),
+                targetPercentage,
+                "Target percentage must be between 1 and 100.");
+
+        var requiredIds = requiredUserIds?.ToHashSet() ?? [];
+        var availableIds = users.Select(u => u.Id).ToHashSet();
+        var unknownIds = requiredIds.Except(availableIds).ToList();
+        if (unknownIds.Count > 0)
+            throw new ArgumentException(
+                $"Required users were not found: {string.Join(", ", unknownIds)}.",
+                nameof(requiredUserIds));
+
         var n = users.Count;
         if (n == 0) return [];
 
-        var qualifyingCount = (int)Math.Ceiling(n / 2.0);
+        var requiredIndices = Enumerable.Range(0, n)
+            .Where(i => requiredIds.Contains(users[i].Id))
+            .ToList();
+        var qualifyingCount = Math.Max(
+            (int)Math.Ceiling(n * targetPercentage / 100.0),
+            requiredIndices.Count);
 
         return n <= BruteForceMaxN
-            ? BruteForceOptimalSet(users, qualifyingCount)
-            : GreedyAddOptimalSet(users, qualifyingCount);
+            ? BruteForceOptimalSet(users, qualifyingCount, requiredIndices)
+            : GreedyAddOptimalSet(users, qualifyingCount, requiredIndices);
     }
 
     public static bool CanBuildSpec(List<CustomSetPiece> spec, User user)
@@ -37,11 +59,20 @@ public static class CustomSetService
 
     // Enumerate all C(n, qualifyingCount) subsets, pick the one whose intersection
     // spec is the largest.
-    private static List<CustomSetPiece> BruteForceOptimalSet(List<User> users, int qualifyingCount)
+    private static List<CustomSetPiece> BruteForceOptimalSet(
+        List<User> users,
+        int qualifyingCount,
+        List<int> requiredIndices)
     {
+        var required = requiredIndices.ToHashSet();
+        var optionalIndices = Enumerable.Range(0, users.Count)
+            .Where(i => !required.Contains(i))
+            .ToList();
+        var optionalCount = qualifyingCount - requiredIndices.Count;
         var best = new List<CustomSetPiece>();
-        foreach (var indices in Subsets(users.Count, qualifyingCount))
+        foreach (var optionalSubset in Subsets(optionalIndices.Count, optionalCount))
         {
+            var indices = requiredIndices.Concat(optionalSubset.Select(i => optionalIndices[i]));
             var spec = IntersectionSpec(indices.Select(i => users[i]));
             if (IsBetter(spec, best)) best = spec;
         }
@@ -50,12 +81,18 @@ public static class CustomSetService
 
     // Greedily add users one at a time, each time picking the candidate whose
     // addition maximises the intersection spec. O(qualifyingCount * n * pieces).
-    private static List<CustomSetPiece> GreedyAddOptimalSet(List<User> users, int qualifyingCount)
+    private static List<CustomSetPiece> GreedyAddOptimalSet(
+        List<User> users,
+        int qualifyingCount,
+        List<int> requiredIndices)
     {
-        var remaining = Enumerable.Range(0, users.Count).ToList();
-        var chosen    = new List<int>();
+        var chosen = requiredIndices.ToList();
+        var required = requiredIndices.ToHashSet();
+        var remaining = Enumerable.Range(0, users.Count)
+            .Where(i => !required.Contains(i))
+            .ToList();
 
-        for (var i = 0; i < qualifyingCount; i++)
+        while (chosen.Count < qualifyingCount)
         {
             var bestIdx  = -1;
             var bestSpec = new List<CustomSetPiece>();
@@ -63,7 +100,11 @@ public static class CustomSetService
             foreach (var idx in remaining)
             {
                 var spec = IntersectionSpec(chosen.Append(idx).Select(j => users[j]));
-                if (IsBetter(spec, bestSpec)) { bestSpec = spec; bestIdx = idx; }
+                if (bestIdx < 0 || IsBetter(spec, bestSpec))
+                {
+                    bestSpec = spec;
+                    bestIdx = idx;
+                }
             }
 
             if (bestIdx < 0) break;

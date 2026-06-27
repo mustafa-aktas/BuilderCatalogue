@@ -7,14 +7,95 @@
 <PageTitle>Custom Set Builder</PageTitle>
 <h1 class="mb-2"><span class="lego-stud">&#9632;</span> Custom Set Builder</h1>
 <p class="text-muted mb-4">
-    Find the largest set that at least 50% of all users can build from their own inventory.
+    Find the largest set that your selected users and a target percentage of all users can build.
 </p>
 
-@if (!_calculated && !_calculating)
+@if (_loadingUsers)
 {
-    <button class="btn btn-warning btn-lg" @onclick="CalculateAsync">
-        Calculate
-    </button>
+    <div class="d-flex align-items-center gap-2 my-4">
+        <div class="spinner-border spinner-border-sm text-warning" role="status"></div>
+        <span class="text-muted">Loading users…</span>
+    </div>
+}
+else if (_allUsers.Count > 0)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-4">
+                <div class="col-12 col-lg-4">
+                    <label for="target-percentage" class="form-label fw-semibold">
+                        Target threshold
+                    </label>
+                    <div class="input-group" style="max-width:180px">
+                        <input id="target-percentage"
+                               class="form-control"
+                               type="number"
+                               min="1"
+                               max="100"
+                               value="@_targetPercentage"
+                               @onchange="OnThresholdChanged"
+                               disabled="@_calculating" />
+                        <span class="input-group-text">%</span>
+                    </div>
+                    <div class="form-text">
+                        At least @RequiredBuilderCount of @_totalUsers users must be able to build the result.
+                    </div>
+                    @if (!HasValidThreshold)
+                    {
+                        <div class="text-danger small mt-1">Enter a percentage from 1 to 100.</div>
+                    }
+                </div>
+
+                <div class="col-12 col-lg-8">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <span class="form-label fw-semibold mb-0 d-block">Required users</span>
+                            <span class="text-muted small">
+                                Selected users are guaranteed to be able to build the generated set.
+                            </span>
+                        </div>
+                        @if (_selectedUserIds.Count > 0)
+                        {
+                            <button class="btn btn-link btn-sm"
+                                    @onclick="ClearTargets"
+                                    disabled="@_calculating">
+                                Clear
+                            </button>
+                        }
+                    </div>
+
+                    <div class="row row-cols-1 row-cols-md-2 g-2">
+                        @foreach (var user in _allUsers.OrderBy(u => u.Username))
+                        {
+                            var inputId = $"target-{user.Id}";
+                            <div class="col">
+                                <div class="form-check border rounded p-2 ps-5 h-100">
+                                    <input id="@inputId"
+                                           class="form-check-input"
+                                           type="checkbox"
+                                           checked="@_selectedUserIds.Contains(user.Id)"
+                                           @onchange="e => ToggleTarget(user.Id, e)"
+                                           disabled="@_calculating" />
+                                    <label class="form-check-label w-100" for="@inputId">
+                                        <span class="fw-semibold">@user.Username</span>
+                                        <span class="text-muted small d-block">
+                                            @user.BrickCount.ToString("N0") pieces · @user.Location
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-warning btn-lg mt-4"
+                    @onclick="CalculateAsync"
+                    disabled="@(_calculating || !HasValidThreshold)">
+                @(_calculated ? "Recalculate" : "Generate set")
+            </button>
+        </div>
+    </div>
 }
 
 @if (_calculating)
@@ -34,10 +115,6 @@
                      aria-valuemin="0"
                      aria-valuemax="@_totalUsers"></div>
             </div>
-        }
-        else
-        {
-            <p class="text-muted">Loading users…</p>
         }
     </div>
 }
@@ -65,12 +142,17 @@
                 @_usersWhoCanBuild / @_totalUsers users can build this
             </span>
         </div>
+        @if (_selectedUserIds.Count > 0)
+        {
+            <div class="col-auto">
+                <span class="badge bg-success fs-6 px-3 py-2">
+                    @_targetUsersWhoCanBuild / @_selectedUserIds.Count required users can build this
+                </span>
+            </div>
+        }
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h5 class="mb-0">Set Specification</h5>
-        <button class="btn btn-outline-secondary btn-sm" @onclick="CalculateAsync">↻ Recalculate</button>
-    </div>
+    <h5 class="mb-2">Set Specification</h5>
 
     <div style="max-height:500px;overflow-y:auto;">
         <table class="table table-sm table-striped">
@@ -99,42 +181,109 @@
 }
 
 @code {
+    private List<UserSummary> _allUsers = [];
+    private readonly HashSet<string> _selectedUserIds = [];
     private List<CustomSetPiece>? _spec;
-    private bool    _calculating;
-    private bool    _calculated;
+    private bool _loadingUsers = true;
+    private bool _calculating;
+    private bool _calculated;
     private string? _error;
 
+    private int _targetPercentage = 50;
     private int _totalUsers;
     private int _loadedUsers;
     private int _usersWhoCanBuild;
+    private int _targetUsersWhoCanBuild;
+
+    private bool HasValidThreshold => _targetPercentage is >= 1 and <= 100;
+
+    private int RequiredBuilderCount =>
+        Math.Max(
+            (int)Math.Ceiling(_totalUsers * Math.Clamp(_targetPercentage, 1, 100) / 100.0),
+            _selectedUserIds.Count);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _allUsers = await Api.GetUsersAsync();
+            _totalUsers = _allUsers.Count;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loadingUsers = false;
+        }
+    }
+
+    private void OnThresholdChanged(ChangeEventArgs args)
+    {
+        _targetPercentage = int.TryParse(args.Value?.ToString(), out var percentage)
+            ? percentage
+            : 0;
+
+        InvalidateResult();
+    }
+
+    private void ToggleTarget(string userId, ChangeEventArgs args)
+    {
+        if (args.Value is true)
+            _selectedUserIds.Add(userId);
+        else
+            _selectedUserIds.Remove(userId);
+
+        InvalidateResult();
+    }
+
+    private void ClearTargets()
+    {
+        _selectedUserIds.Clear();
+        InvalidateResult();
+    }
+
+    private void InvalidateResult()
+    {
+        _calculated = false;
+        _spec = null;
+        _error = null;
+    }
 
     private async Task CalculateAsync()
     {
+        if (!HasValidThreshold)
+        {
+            _error = "Target percentage must be between 1 and 100.";
+            return;
+        }
+
         _calculating = true;
-        _calculated  = false;
-        _error       = null;
-        _spec        = null;
-        _totalUsers  = 0;
+        _calculated = false;
+        _error = null;
+        _spec = null;
         _loadedUsers = 0;
 
         try
         {
-            var allUsers = await Api.GetUsersAsync();
-            _totalUsers  = allUsers.Count;
-            StateHasChanged();
-
-            // Fetch sequentially so we can show per-user progress
             var inventories = new List<User>(_totalUsers);
-            foreach (var summary in allUsers)
+            foreach (var summary in _allUsers)
             {
                 inventories.Add(await UserCache.GetUserAsync(summary.Id));
                 _loadedUsers++;
                 StateHasChanged();
             }
 
-            _spec = CustomSetService.BuildOptimalSet(inventories);
+            _spec = CustomSetService.BuildOptimalSet(
+                inventories,
+                _targetPercentage,
+                _selectedUserIds);
 
             _usersWhoCanBuild = inventories.Count(u => CustomSetService.CanBuildSpec(_spec, u));
+            _targetUsersWhoCanBuild = inventories.Count(u =>
+                _selectedUserIds.Contains(u.Id) &&
+                CustomSetService.CanBuildSpec(_spec, u));
             _calculated = true;
         }
         catch (Exception ex)
