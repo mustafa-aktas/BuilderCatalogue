@@ -4,83 +4,82 @@ namespace LegoChallenge.Client.Services;
 
 public static class ColorSubstitutionService
 {
-    /// <summary>
-    /// Finds a valid colour-substitution assignment using bipartite matching over ALL
-    /// candidate colours (including other set-colours). After matching, a co-requirement
-    /// loop ensures every set-colour used as a substitute also has its own group matched
-    /// (i.e. it is itself being substituted away). Only succeeds when every short group
-    /// is covered and all co-requirements are satisfied — no partial results.
-    /// </summary>
     public static SubstitutedBuildResult Analyze(LegoSet set, User user)
     {
-        // Int-keyed inventory avoids repeated string/int conversions throughout.
-        var inventory = user.Collection.ToDictionary(
-            p => p.PieceId,
-            p => p.Variants
-                .Where(v => int.TryParse(v.Color, out _))
-                .ToDictionary(v => int.Parse(v.Color), v => v.Count));
+        var inventory = InventoryBuilder.BuildNested(user);
 
-        var setColors = set.Pieces.Select(p => p.Part.Material).ToHashSet();
+        var colorGroups = set.Pieces
+            .GroupBy(p => p.Part.ColorCode)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
-        var allGroups = set.Pieces
-            .GroupBy(p => p.Part.Material)
-            .Select(g => (Color: g.Key, Pieces: g.ToList()))
-            .ToList();
+        var setColors = colorGroups.Keys.ToHashSet();
 
-        var shortGroups = allGroups
-            .Where(g => !g.Pieces.All(p => Own(inventory, p.Part.DesignId, g.Color) >= p.Quantity))
-            .ToList();
+        var candidates = colorGroups.ToDictionary(
+            kv => kv.Key,
+            kv => GetCandidates(kv.Key, kv.Value, inventory));
+
+        var shortGroups = colorGroups
+            .Where(kv => !kv.Value.All(p => Own(inventory, p.Part.DesignId, kv.Key) >= p.Quantity))
+            .Select(kv => kv.Key)
+            .ToHashSet();
 
         if (shortGroups.Count == 0)
             return new SubstitutedBuildResult(true, [], []);
 
-        var shortColors     = shortGroups.Select(g => g.Color).ToHashSet();
-        var fulfilledGroups = allGroups.Where(g => !shortColors.Contains(g.Color)).ToList();
+        var assignment = new Dictionary<int, int>();
+        var claimed    = new HashSet<int>();
+        var todo       = shortGroups.ToList();
 
-        var adjacency = allGroups.ToDictionary(
-            g => g.Color,
-            g => AllCandidates(g.Color, g.Pieces, inventory));
-
-        var origToSub = new Dictionary<int, int>();
-        var subToOrig = new Dictionary<int, int>();
-
-        foreach (var (color, _) in shortGroups)
-            Augment(color, adjacency, origToSub, subToOrig, new HashSet<int>());
-
-        foreach (var (color, _) in fulfilledGroups)
-            Augment(color, adjacency, origToSub, subToOrig, new HashSet<int>());
-
-        bool changed;
-        do
+        if (Solve(todo, 0, assignment, claimed, setColors, candidates))
         {
-            changed = false;
-            foreach (var s in subToOrig.Keys.Where(s => setColors.Contains(s) && !origToSub.ContainsKey(s)).ToList())
-            {
-                if (Augment(s, adjacency, origToSub, subToOrig, new HashSet<int>()))
-                    changed = true;
-            }
-        } while (changed);
-
-        bool allShortMatched = shortGroups.All(g => origToSub.ContainsKey(g.Color));
-        bool coReqsMet       = subToOrig.Keys.Where(s => setColors.Contains(s)).All(s => origToSub.ContainsKey(s));
-
-        if (allShortMatched && coReqsMet)
-        {
-            var subs = origToSub.Select(kv => new SubstitutionInfo(kv.Key, kv.Value)).ToList();
+            var subs = assignment.Select(kv => new SubstitutionInfo(kv.Key, kv.Value)).ToList();
             return new SubstitutedBuildResult(true, [], subs);
         }
 
         var missing = shortGroups
-            .SelectMany(g => g.Pieces
-                .Select(p => (Piece: p, Have: Own(inventory, p.Part.DesignId, g.Color)))
+            .SelectMany(color => colorGroups[color]
+                .Select(p => (Piece: p, Have: Own(inventory, p.Part.DesignId, color)))
                 .Where(x => x.Have < x.Piece.Quantity)
-                .Select(x => new MissingPiece(x.Piece.Part.DesignId, g.Color, x.Piece.Quantity, x.Have)))
+                .Select(x => new MissingPiece(x.Piece.Part.DesignId, color, x.Piece.Quantity, x.Have)))
             .ToList();
 
         return new SubstitutedBuildResult(false, missing, []);
     }
 
-    private static List<int> AllCandidates(
+    private static bool Solve(
+        List<int> todo,
+        int index,
+        Dictionary<int, int> assignment,
+        HashSet<int> claimed,
+        HashSet<int> setColors,
+        Dictionary<int, List<int>> candidates)
+    {
+        if (index >= todo.Count) return true;
+
+        var color = todo[index];
+
+        foreach (var sub in candidates[color])
+        {
+            if (claimed.Contains(sub)) continue;
+
+            assignment[color] = sub;
+            claimed.Add(sub);
+
+            bool addedCoReq = setColors.Contains(sub) && !todo.Contains(sub);
+            if (addedCoReq) todo.Add(sub);
+
+            if (Solve(todo, index + 1, assignment, claimed, setColors, candidates))
+                return true;
+
+            assignment.Remove(color);
+            claimed.Remove(sub);
+            if (addedCoReq) todo.RemoveAt(todo.Count - 1);
+        }
+
+        return false;
+    }
+
+    private static List<int> GetCandidates(
         int originalColor,
         List<SetPiece> pieces,
         Dictionary<string, Dictionary<int, int>> inventory) =>
@@ -92,30 +91,8 @@ public static class ColorSubstitutionService
             .Where(c => pieces.All(p => Own(inventory, p.Part.DesignId, c) >= p.Quantity))
             .ToList();
 
-    private static bool Augment(
-        int color,
-        Dictionary<int, List<int>> adjacency,
-        Dictionary<int, int> origToSub,
-        Dictionary<int, int> subToOrig,
-        HashSet<int> visited)
-    {
-        foreach (var sub in adjacency[color])
-        {
-            if (!visited.Add(sub)) continue;
-
-            if (!subToOrig.TryGetValue(sub, out var incumbent) ||
-                Augment(incumbent, adjacency, origToSub, subToOrig, visited))
-            {
-                origToSub[color] = sub;
-                subToOrig[sub]   = color;
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static int Own(
         Dictionary<string, Dictionary<int, int>> inventory,
-        string designId, int color) =>
-        inventory.TryGetValue(designId, out var v) && v.TryGetValue(color, out var n) ? n : 0;
+        string designId, int colorCode) =>
+        inventory.TryGetValue(designId, out var v) && v.TryGetValue(colorCode, out var n) ? n : 0;
 }

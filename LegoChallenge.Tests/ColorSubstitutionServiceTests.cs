@@ -127,12 +127,12 @@ public class ColorSubstitutionServiceTests
         var set = Build.Set(
             Build.Piece("A", 1, 5),
             Build.Piece("B", 5, 5));
-        
+
         var user = Build.UserWith(
             ("A", 8, 5),
             ("A", 1, 5),
             ("B", 1, 5));
-        
+
         //Substitution should free up color 1 by using color 8 for A, allowing B to use color 1.
         var result = ColorSubstitutionService.Analyze(set, user);
         Assert.True(result.CanBuild);

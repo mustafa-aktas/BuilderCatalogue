@@ -2,11 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace LegoChallenge.Client.Models;
 
-// ── API response wrappers ──────────────────────────────────────────────────
-
-public record UsersResponse(List<UserSummary> Users);
-public record SetsResponse(List<SetSummary> Sets);
-public record ColoursResponse(List<Colour> Colours);
+// Response wrappers are private to LegoApiService — not public domain types.
 
 // ── User ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +17,7 @@ public record User(
 
 public record PieceStock(string PieceId, List<PieceVariant> Variants);
 
-public record PieceVariant(string Color, int Count);
+public record PieceVariant([property: JsonPropertyName("color")] int ColorCode, int Count);
 
 // ── Sets ───────────────────────────────────────────────────────────────────
 
@@ -38,7 +34,7 @@ public record SetPiece(PartInfo Part, int Quantity);
 
 public record PartInfo(
     [property: JsonPropertyName("designID")] string DesignId,
-    int Material,
+    [property: JsonPropertyName("material")] int ColorCode,
     string PartType);
 
 // ── Colours ────────────────────────────────────────────────────────────────
@@ -59,6 +55,7 @@ public record MissingPiece(string DesignId, int ColorCode, int Required, int Hav
 public record ContributedPiece(string DesignId, int ColorCode, int Quantity);
 public record CollaboratorContribution(UserSummary User, List<ContributedPiece> Pieces);
 public record CollaborationResult(bool Solvable, List<CollaboratorContribution> Collaborators, List<MissingPiece> StillMissing);
+public record CollaborationCombination(List<CollaboratorContribution> Contributors);
 
 // ── Colour substitution ────────────────────────────────────────────────────
 

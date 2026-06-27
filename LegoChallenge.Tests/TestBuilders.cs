@@ -16,7 +16,7 @@ internal static class Build
             .GroupBy(x => x.designId)
             .Select(g => new PieceStock(
                 g.Key,
-                g.Select(x => new PieceVariant(x.color.ToString(), x.count)).ToList()))
+                g.Select(x => new PieceVariant(x.color, x.count)).ToList()))
             .ToList();
         return new User("u1", "tester", "NL", stocks.Sum(s => s.Variants.Sum(v => v.Count)), stocks);
     }

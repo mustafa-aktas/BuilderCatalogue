@@ -28,13 +28,10 @@ public static class CustomSetService
 
     public static bool CanBuildSpec(List<CustomSetPiece> spec, User user)
     {
-        var inventory = user.Collection.ToDictionary(
-            p => p.PieceId,
-            p => p.Variants.ToDictionary(v => v.Color, v => v.Count));
-
+        var inventory = InventoryBuilder.BuildNested(user);
         return spec.All(p =>
             inventory.TryGetValue(p.DesignId, out var variants) &&
-            variants.TryGetValue(p.ColorCode.ToString(), out var count) &&
+            variants.TryGetValue(p.ColorCode, out var count) &&
             count >= p.Quantity);
     }
 
@@ -87,13 +84,13 @@ public static class CustomSetService
         var minQty = users[0].Collection
             .SelectMany(s => s.Variants
                 .Where(v => v.Count > 0)
-                .Select(v => (Key: (s.PieceId, v.Color), v.Count)))
+                .Select(v => (Key: (s.PieceId, v.ColorCode), v.Count)))
             .ToDictionary(x => x.Key, x => x.Count);
 
         foreach (var user in users.Skip(1))
         {
             var inv = user.Collection
-                .SelectMany(s => s.Variants.Select(v => (Key: (s.PieceId, v.Color), v.Count)))
+                .SelectMany(s => s.Variants.Select(v => (Key: (s.PieceId, v.ColorCode), v.Count)))
                 .ToDictionary(x => x.Key, x => x.Count);
 
             foreach (var key in minQty.Keys.ToList())
@@ -105,11 +102,9 @@ public static class CustomSetService
             }
         }
 
-        var result = new List<CustomSetPiece>();
-        foreach (var (key, qty) in minQty)
-            if (int.TryParse(key.Color, out var colorCode))
-                result.Add(new CustomSetPiece(key.PieceId, colorCode, qty));
-        return result;
+        return minQty
+            .Select(kv => new CustomSetPiece(kv.Key.PieceId, kv.Key.ColorCode, kv.Value))
+            .ToList();
     }
 
     // More distinct types = better; equal types → higher total quantity wins.

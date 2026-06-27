@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 const string apiBase = "https://d30r5p5favh3z8.cloudfront.net/";
 
 builder.Services.AddHttpClient<LegoApiService>(c => c.BaseAddress = new Uri(apiBase));
+builder.Services.AddSingleton<ColorService>();
 builder.Services.AddSingleton<UserCacheService>();
 builder.Services.AddSingleton<ActiveUserService>();
 
@@ -16,6 +17,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
 
 var app = builder.Build();
+await app.Services.GetRequiredService<ColorService>().InitializeAsync();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

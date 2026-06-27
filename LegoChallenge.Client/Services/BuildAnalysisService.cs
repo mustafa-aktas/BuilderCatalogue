@@ -12,23 +12,17 @@ public static class BuildAnalysisService
 
     internal static List<MissingPiece> GetMissing(LegoSet set, User user)
     {
-        var inventory = user.Collection.ToDictionary(
-            p => p.PieceId,
-            p => p.Variants.ToDictionary(v => v.Color, v => v.Count));
-
-        var missing = new List<MissingPiece>();
+        var inventory = InventoryBuilder.BuildNested(user);
+        var missing   = new List<MissingPiece>();
 
         foreach (var piece in set.Pieces)
         {
-            var designId = piece.Part.DesignId;
-            var colorKey = piece.Part.Material.ToString();
             var required = piece.Quantity;
-
-            var have = inventory.TryGetValue(designId, out var variants)
-                    && variants.TryGetValue(colorKey, out var count) ? count : 0;
+            var have     = inventory.TryGetValue(piece.Part.DesignId, out var variants)
+                        && variants.TryGetValue(piece.Part.ColorCode, out var count) ? count : 0;
 
             if (have < required)
-                missing.Add(new MissingPiece(designId, piece.Part.Material, required, have));
+                missing.Add(new MissingPiece(piece.Part.DesignId, piece.Part.ColorCode, required, have));
         }
 
         return missing;
