@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx --yes @agentclientprotocol/claude-agent-acp --version 2>&1)"
+    ]
+  }
+}

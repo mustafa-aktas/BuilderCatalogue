@@ -1,0 +1,152 @@
+@page "/custom-set"
+@rendermode InteractiveAuto
+@inject LegoApiService Api
+@inject UserCacheService UserCache
+@inject ColorService Colours
+
+<PageTitle>Custom Set Builder</PageTitle>
+<h1 class="mb-2"><span class="lego-stud">&#9632;</span> Custom Set Builder</h1>
+<p class="text-muted mb-4">
+    Find the largest set that at least 50% of all users can build from their own inventory.
+</p>
+
+@if (!_calculated && !_calculating)
+{
+    <button class="btn btn-warning btn-lg" @onclick="CalculateAsync">
+        Calculate
+    </button>
+}
+
+@if (_calculating)
+{
+    <div class="d-flex flex-column align-items-center mt-5 gap-3">
+        <div class="spinner-border text-warning" style="width:3rem;height:3rem;" role="status">
+            <span class="visually-hidden">Loading…</span>
+        </div>
+        @if (_totalUsers > 0)
+        {
+            <p class="text-muted">Fetching inventory @_loadedUsers of @_totalUsers…</p>
+            <div class="progress" style="width:300px">
+                <div class="progress-bar bg-warning"
+                     style="width:@(100 * _loadedUsers / _totalUsers)%"
+                     role="progressbar"
+                     aria-valuenow="@_loadedUsers"
+                     aria-valuemin="0"
+                     aria-valuemax="@_totalUsers"></div>
+            </div>
+        }
+        else
+        {
+            <p class="text-muted">Loading users…</p>
+        }
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger mt-3">@_error</div>
+}
+
+@if (_spec is not null && !_calculating)
+{
+    <div class="row g-2 mb-4">
+        <div class="col-auto">
+            <span class="badge bg-warning text-dark fs-6 px-3 py-2">
+                @_spec.Sum(p => p.Quantity).ToString("N0") total pieces
+            </span>
+        </div>
+        <div class="col-auto">
+            <span class="badge bg-secondary fs-6 px-3 py-2">
+                @_spec.Count distinct types
+            </span>
+        </div>
+        <div class="col-auto">
+            <span class="badge bg-info text-dark fs-6 px-3 py-2">
+                @_usersWhoCanBuild / @_totalUsers users can build this
+            </span>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0">Set Specification</h5>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CalculateAsync">↻ Recalculate</button>
+    </div>
+
+    <div style="max-height:500px;overflow-y:auto;">
+        <table class="table table-sm table-striped">
+            <thead class="table-dark sticky-top">
+                <tr>
+                    <th>Part ID</th>
+                    <th>Color</th>
+                    <th class="text-end">Qty</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _spec.OrderBy(p => p.DesignId))
+                {
+                    <tr>
+                        <td><code>@p.DesignId</code></td>
+                        <td>
+                            <span class="color-swatch me-1" style="background:@ColorHint(p.ColorCode)"></span>
+                            @ColorName(p.ColorCode)
+                        </td>
+                        <td class="text-end">@p.Quantity</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<CustomSetPiece>? _spec;
+    private bool    _calculating;
+    private bool    _calculated;
+    private string? _error;
+
+    private int _totalUsers;
+    private int _loadedUsers;
+    private int _usersWhoCanBuild;
+
+    private async Task CalculateAsync()
+    {
+        _calculating = true;
+        _calculated  = false;
+        _error       = null;
+        _spec        = null;
+        _totalUsers  = 0;
+        _loadedUsers = 0;
+
+        try
+        {
+            var allUsers = await Api.GetUsersAsync();
+            _totalUsers  = allUsers.Count;
+            StateHasChanged();
+
+            // Fetch sequentially so we can show per-user progress
+            var inventories = new List<User>(_totalUsers);
+            foreach (var summary in allUsers)
+            {
+                inventories.Add(await UserCache.GetUserAsync(summary.Id));
+                _loadedUsers++;
+                StateHasChanged();
+            }
+
+            _spec = CustomSetService.BuildOptimalSet(inventories);
+
+            _usersWhoCanBuild = inventories.Count(u => CustomSetService.CanBuildSpec(_spec, u));
+            _calculated = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _calculating = false;
+        }
+    }
+
+    private string ColorName(int code) => Colours.GetName(code);
+    private string ColorHint(int code) => Colours.GetHint(code);
+}

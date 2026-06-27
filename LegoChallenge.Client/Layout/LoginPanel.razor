@@ -1,0 +1,72 @@
+@rendermode InteractiveAuto
+@inject LegoApiService Api
+@inject ActiveUserService ActiveUser
+
+<div class="d-flex flex-column align-items-center justify-content-center" style="min-height:100vh;">
+    <div style="max-width:480px;width:100%;padding:2rem;">
+        <div class="text-center mb-5">
+            <h1 class="fw-bold display-5">
+                <span class="lego-stud">&#9632;</span> LEGO Challenge
+            </h1>
+            <p class="text-muted">Choose your account to continue</p>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-warning" style="width:3rem;height:3rem;" role="status">
+                    <span class="visually-hidden">Loading…</span>
+                </div>
+            </div>
+        }
+        else if (_error is not null)
+        {
+            <div class="alert alert-danger d-flex justify-content-between align-items-center">
+                <span>@_error</span>
+                <button class="btn btn-sm btn-danger ms-2" @onclick="LoadAsync">Retry</button>
+            </div>
+        }
+        else
+        {
+            <div class="d-flex flex-column gap-2">
+                @foreach (var u in _users)
+                {
+                    <button class="btn btn-outline-secondary text-start p-3 d-flex align-items-center gap-3"
+                            @onclick="() => ActiveUser.Login(u)">
+                        <span class="lego-stud fs-4">&#9632;</span>
+                        <div>
+                            <div class="fw-bold">@u.Username</div>
+                            <div class="text-muted small">@u.Location &nbsp;·&nbsp; @u.BrickCount.ToString("N0") pieces</div>
+                        </div>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<UserSummary> _users = [];
+    private bool    _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error   = null;
+        try
+        {
+            _users = await Api.GetUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}
