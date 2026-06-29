@@ -105,7 +105,7 @@ This algorithm is deliberately strict: owning the correct shape in another colou
 
 **Complexity:** approximately `O(I + P)`, where `I` is the inventory size and `P` is the number of set requirement rows.
 
-Implementation: [`BuildAnalysisService`](LegoChallenge.Client/Services/BuildAnalysisService.cs)
+Implementation: [`BuildAnalysisService`](BuilderCatalogue.Client/Services/BuildAnalysisService.cs)
 
 ### 2. Collaboration search
 
@@ -133,7 +133,7 @@ Coverage enumeration costs `O(2^N × N × D)`, where `N` is the number of contri
 
 The service also contains a greedy minimum-collaborator approximation and a method that lists all individual contributors, although the current UI presents the exhaustive minimal combinations.
 
-Implementation: [`CollaborationService`](LegoChallenge.Client/Services/CollaborationService.cs)
+Implementation: [`CollaborationService`](BuilderCatalogue.Client/Services/CollaborationService.cs)
 
 ### 3. Whole-colour substitution
 
@@ -163,7 +163,7 @@ This is a small constraint-satisfaction problem similar to bipartite matching. B
 
 **Worst-case complexity:** exponential in the number of colour groups. Candidate validation itself is linear in the pieces within each group.
 
-Implementation: [`ColorSubstitutionService`](LegoChallenge.Client/Services/ColorSubstitutionService.cs)
+Implementation: [`ColorSubstitutionService`](BuilderCatalogue.Client/Services/ColorSubstitutionService.cs)
 
 ### 4. Custom-set optimisation
 
@@ -221,8 +221,8 @@ For more than 20 users, exhaustive search may become impractical. The service sw
 
 The greedy path always returns a feasible result, but it is not guaranteed to find the globally largest specification. This is an explicit scalability tradeoff.
 
-Implementation: [`CustomSetService`](LegoChallenge.Client/Services/CustomSetService.cs)  
-UI: [`CustomSetBuilder`](LegoChallenge.Client/Pages/CustomSetBuilder.razor)
+Implementation: [`CustomSetService`](BuilderCatalogue.Client/Services/CustomSetService.cs)  
+UI: [`CustomSetBuilder`](BuilderCatalogue.Client/Pages/CustomSetBuilder.razor)
 
 ## Correctness rules and invariants
 
@@ -309,7 +309,7 @@ A concise presentation can follow this sequence:
 
 ```text
 LegoChallenge/                 ASP.NET Core host
-LegoChallenge.Client/
+BuilderCatalogue.Client/
   Models/                      API and result records
   Pages/                       Home and custom-set UI
   Components/                  Reusable set-result presentation
