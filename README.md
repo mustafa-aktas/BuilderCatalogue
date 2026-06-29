@@ -4,8 +4,6 @@ A Blazor application that compares LEGO set requirements with user inventories. 
 
 This document is written as both a technical overview and a set of presentation notes.
 
-For method-level details, DFS walkthroughs, correctness arguments, and technical-review questions, see [`TECHNICAL_NOTES.md`](TECHNICAL_NOTES.md).
-
 ## What the application does
 
 The application supports four related use cases:
